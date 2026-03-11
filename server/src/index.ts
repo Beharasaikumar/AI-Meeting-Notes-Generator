@@ -1,4 +1,3 @@
-// src/index.ts
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -13,6 +12,8 @@ import { testPineconeConnection } from "./services/pineconeService";
 import meetingsRouter from "./routes/meetings";
 import searchRouter from "./routes/search";
 import aiRouter from "./routes/ai";
+
+import authRouter from "./routes/auth"
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? "3001");
@@ -57,6 +58,7 @@ app.get("/health", async (_req, res) => {
   res.status(allOk ? 200 : 503).json(status);
 });
 
+app.use("/api/auth", authRouter);
 app.use("/api/meetings", meetingsRouter);
 app.use("/api/search", searchRouter);
 app.use("/api/ai", aiRouter);

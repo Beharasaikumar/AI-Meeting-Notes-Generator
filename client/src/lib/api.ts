@@ -2,19 +2,52 @@
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 
-async function request<T>(
-  path: string,
-  options: RequestInit = {}
-): Promise<T> {
+
+// async function request<T>(
+//   path: string,
+//   options: RequestInit = {}
+// ): Promise<T> {
+//   const res = await fetch(`${BASE_URL}${path}`, {
+//     ...options,
+//     headers: {
+//       "Content-Type": "application/json",
+//       ...options.headers,
+//     },
+//   });
+
+//   const data = await res.json();
+
+//   if (!res.ok || !data.success) {
+//     throw new Error(data.error ?? `Request failed: ${res.status}`);
+//   }
+
+//   return data.data as T;
+// }
+
+function getToken(): string | null {
+  return localStorage.getItem("meetingmind_token");
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = getToken();
+
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
   });
 
   const data = await res.json();
+
+  if (res.status === 401) {
+    localStorage.removeItem("meetingmind_token");
+    localStorage.removeItem("meetingmind_user");
+    window.location.href = "/login";
+    throw new Error("Session expired");
+  }
 
   if (!res.ok || !data.success) {
     throw new Error(data.error ?? `Request failed: ${res.status}`);
@@ -48,35 +81,88 @@ export const meetingsApi = {
   delete: (id: string) =>
     request<void>(`/api/meetings/${id}`, { method: "DELETE" }),
 
-  uploadAudio: (id: string, file: File, onProgress?: (pct: number) => void) => {
-    return new Promise<{ filePath: string; meetingId: string }>(
-      (resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        const formData = new FormData();
-        formData.append("audio", file);
 
-        if (onProgress) {
-          xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
-          };
-        }
+uploadAudio: (id: string, file: File, onProgress?: (pct: number) => void) => {
+  return new Promise<{ filePath: string; meetingId: string }>(
+    (resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const formData = new FormData();
+      formData.append("audio", file);
 
-        xhr.onload = () => {
-          const data = JSON.parse(xhr.responseText);
-          if (xhr.status >= 200 && xhr.status < 300 && data.success) {
-            resolve(data.data);
-          } else {
-            reject(new Error(data.error ?? "Upload failed"));
-          }
-        };
-
-        xhr.onerror = () => reject(new Error("Network error during upload"));
-
+      const token = localStorage.getItem("meetingmind_token");
+      if (token) {
         xhr.open("POST", `${BASE_URL}/api/meetings/${id}/upload`);
-        xhr.send(formData);
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      } else {
+        xhr.open("POST", `${BASE_URL}/api/meetings/${id}/upload`);
       }
-    );
-  },
+
+      if (onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable)
+            onProgress(Math.round((e.loaded / e.total) * 100));
+        };
+      }
+
+      xhr.onload = () => {
+        const data = JSON.parse(xhr.responseText);
+        if (xhr.status === 401) {
+          localStorage.removeItem("meetingmind_token");
+          localStorage.removeItem("meetingmind_user");
+          window.location.href = "/login";
+          reject(new Error("Session expired"));
+          return;
+        }
+        if (xhr.status >= 200 && xhr.status < 300 && data.success) {
+          resolve(data.data);
+        } else {
+          reject(new Error(data.error ?? "Upload failed"));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error("Network error during upload"));
+
+      xhr.send(formData);
+    }
+  );
+},
+};
+
+export interface LoginResponse {
+  user: { id: string; name: string; email: string };
+  token: string;
+}
+
+export const authApi = {
+  register: (body: { name: string; email: string; password: string }) =>
+    request<LoginResponse>("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  login: (body: { email: string; password: string }) =>
+    request<LoginResponse>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  logout: () =>
+    request<void>("/api/auth/logout", { method: "POST" }),
+
+  me: () =>
+    request<{ id: string; name: string; email: string }>("/api/auth/me"),
+
+  forgotPassword: (email: string) =>
+    request<void>("/api/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  resetPassword: (token: string, password: string) =>
+    request<void>("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
+    }),
 };
 
 export const actionItemsApi = {

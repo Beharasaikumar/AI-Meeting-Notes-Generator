@@ -17,3 +17,17 @@ export function extractAudio(videoPath: string): Promise<string> {
       .on("error", reject);
   });
 }
+
+export function isVideoFile(filename: string): boolean {
+  const ext = path.extname(filename).toLowerCase();
+
+  const videoExtensions = [
+    ".mp4",
+    ".mov",
+    ".webm",
+    ".mkv",
+    ".avi"
+  ];
+
+  return videoExtensions.includes(ext);
+}

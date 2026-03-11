@@ -180,9 +180,9 @@ const Index = () => {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard title="Total Meetings" value={loading ? "…" : stats.totalMeetings} icon={Mic} description="This month" index={0} />
-        <StatCard title="Hours Recorded" value={loading ? "…" : stats.totalHours.toFixed(1)} icon={Clock} description="Total recorded" index={1} />
+        {/* <StatCard title="Hours Recorded" value={loading ? "…" : stats.totalHours.toFixed(1)} icon={Clock} description="Total recorded" index={1} /> */}
         <StatCard title="Actions Done" value={loading ? "…" : stats.actionItemsCompleted} icon={CheckCircle2} description="This week" index={2} />
         <StatCard title="Pending Items" value={loading ? "…" : stats.actionItemsPending} icon={AlertCircle} description="Needs attention" index={3} />
       </div>

@@ -1,20 +1,14 @@
- import { query, transaction, getClient } from "../db";
-import { PoolClient } from "pg";
-import {
-  Meeting,
-  MeetingWithDetails,
-  ActionItem,
-  TranscriptEntry,
-  Decision,
-  CreateMeetingBody,
-  UpdateMeetingBody,
-} from "../types";
-import { upsertMeetingVectors, deleteMeetingVectors } from "./pineconeService";
-import { AppError } from "../middleware/errorHandler";
+import { query, transaction } from "../db";
 import { logger } from "../middleware/logger";
+import {
+  Meeting, MeetingWithDetails, CreateMeetingBody,
+  UpdateMeetingBody, ActionItem, TranscriptEntry,
+  AIAnalysis, NormalisedSegment,
+} from "../types";
 
- 
+
 export async function getAllMeetings(
+  userId: string,
   status?: string,
   search?: string
 ): Promise<Meeting[]> {
@@ -22,72 +16,83 @@ export async function getAllMeetings(
     SELECT id, title, date, duration, participants, status, tags,
            summary, audio_file_path, created_at, updated_at
     FROM meetings
-    WHERE 1=1
+    WHERE user_id = $1
   `;
-  const params: unknown[] = [];
+  const params: unknown[] = [userId];
 
   if (status) {
     params.push(status);
     sql += ` AND status = $${params.length}`;
   }
-
   if (search) {
-    params.push(`%${search.toLowerCase()}%`);
-    sql += ` AND (LOWER(title) LIKE $${params.length} OR $${params.length} = ANY(SELECT LOWER(t) FROM unnest(tags) AS t))`;
+    params.push(`%${search}%`);
+    sql += ` AND (title ILIKE $${params.length} OR $${params.length} = ANY(tags))`;
   }
 
   sql += " ORDER BY date DESC";
-
   const result = await query<Meeting>(sql, params);
   return result.rows;
 }
 
-export async function getMeetingById(id: string): Promise<MeetingWithDetails> {
-  const meetingResult = await query<Meeting>(
+export async function getMeetingById(
+  meetingId: string,
+  userId?: string   
+): Promise<MeetingWithDetails> {
+  const conditions = userId
+    ? "WHERE m.id = $1 AND m.user_id = $2"
+    : "WHERE m.id = $1";
+  const params = userId ? [meetingId, userId] : [meetingId];
+
+  const result = await query<Meeting>(
     `SELECT id, title, date, duration, participants, status, tags,
             summary, audio_file_path, created_at, updated_at
-     FROM meetings WHERE id = $1`,
-    [id]
+     FROM meetings m ${conditions}`,
+    params
   );
 
-  if (meetingResult.rows.length === 0) {
-    throw new AppError(404, `Meeting not found: ${id}`);
+  if (result.rows.length === 0) {
+    throw new Error(`Meeting not found`);
   }
 
-  const meeting = meetingResult.rows[0];
+  const meeting = result.rows[0];
 
-  const [actionItemsResult, transcriptResult, decisionsResult] =
-    await Promise.all([
-      query<ActionItem>(
-        "SELECT * FROM action_items WHERE meeting_id = $1 ORDER BY created_at",
-        [id]
-      ),
-      query<TranscriptEntry>(
-        "SELECT * FROM transcript_entries WHERE meeting_id = $1 ORDER BY sequence_order",
-        [id]
-      ),
-      query<Decision>(
-        "SELECT * FROM decisions WHERE meeting_id = $1 ORDER BY created_at",
-        [id]
-      ),
-    ]);
+  const [actionItems, transcript, decisions] = await Promise.all([
+    query<ActionItem>(
+      "SELECT * FROM action_items WHERE meeting_id = $1 ORDER BY created_at",
+      [meetingId]
+    ),
+    query<TranscriptEntry>(
+      "SELECT * FROM transcript_entries WHERE meeting_id = $1 ORDER BY sequence_order",
+      [meetingId]
+    ),
+    query<{ id: string; meeting_id: string; text: string; created_at: string }>(
+      "SELECT * FROM decisions WHERE meeting_id = $1 ORDER BY created_at",
+      [meetingId]
+    ),
+  ]);
 
   return {
     ...meeting,
-    action_items: actionItemsResult.rows,
-    transcript: transcriptResult.rows,
-    decisions: decisionsResult.rows,
+    action_items: actionItems.rows,
+    transcript: transcript.rows,
+    decisions: decisions.rows,
   };
 }
 
-export async function createMeeting(body: CreateMeetingBody): Promise<Meeting> {
+export async function createMeeting(
+  userId: string,
+  body: CreateMeetingBody & { duration?: string }
+): Promise<Meeting> {
   const result = await query<Meeting>(
-    `INSERT INTO meetings (title, date, participants, tags, status)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING *`,
+    `INSERT INTO meetings (user_id, title, date, duration, participants, tags, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id, title, date, duration, participants, status, tags,
+               summary, audio_file_path, created_at, updated_at`,
     [
+      userId,
       body.title,
       body.date,
+      body.duration ?? null,
       body.participants,
       body.tags ?? [],
       body.status ?? "scheduled",
@@ -97,69 +102,81 @@ export async function createMeeting(body: CreateMeetingBody): Promise<Meeting> {
 }
 
 export async function updateMeeting(
-  id: string,
-  body: UpdateMeetingBody
+  meetingId: string,
+  body: Partial<UpdateMeetingBody & { status: string }>,
+  userId?: string
 ): Promise<Meeting> {
-  const existing = await query<Meeting>(
-    "SELECT id FROM meetings WHERE id = $1",
-    [id]
-  );
-  if (existing.rows.length === 0) {
-    throw new AppError(404, `Meeting not found: ${id}`);
-  }
-
   const fields: string[] = [];
-  const values: unknown[] = [];
-  let idx = 1;
+  const params: unknown[] = [];
 
-  const allowed: (keyof UpdateMeetingBody)[] = [
-    "title",
-    "date",
-    "participants",
-    "tags",
-    "status",
-    "summary",
-  ];
-
+  const allowed = ["title", "date", "duration", "participants", "tags", "status", "summary", "audio_file_path"] as const;
   for (const key of allowed) {
-    if (body[key] !== undefined) {
-      fields.push(`${key} = $${idx++}`);
-      values.push(body[key]);
+    if (body[key as keyof typeof body] !== undefined) {
+      params.push(body[key as keyof typeof body]);
+      fields.push(`${key} = $${params.length}`);
     }
   }
 
-  if (fields.length === 0) {
-    throw new AppError(400, "No valid fields to update");
-  }
+  if (fields.length === 0) return getMeetingById(meetingId, userId);
 
-  values.push(id);
-  const result = await query<Meeting>(
-    `UPDATE meetings SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`,
-    values
-  );
+  params.push(meetingId);
+  const idParam = `$${params.length}`;
+
+  let sql = `UPDATE meetings SET ${fields.join(", ")} WHERE id = ${idParam}`;
+  if (userId) {
+    params.push(userId);
+    sql += ` AND user_id = $${params.length}`;
+  }
+  sql += ` RETURNING id, title, date, duration, participants, status, tags,
+                     summary, audio_file_path, created_at, updated_at`;
+
+  const result = await query<Meeting>(sql, params);
+  if (result.rows.length === 0) throw new Error("Meeting not found");
   return result.rows[0];
 }
 
-export async function deleteMeeting(id: string): Promise<void> {
-  const existing = await query<Meeting>(
-    "SELECT id FROM meetings WHERE id = $1",
-    [id]
-  );
-  if (existing.rows.length === 0) {
-    throw new AppError(404, `Meeting not found: ${id}`);
-  }
-
-  await query("DELETE FROM meetings WHERE id = $1", [id]);
-
-   deleteMeetingVectors(id).catch((err) =>
-    logger.warn(`Failed to delete Pinecone vectors for meeting ${id}`, err)
-  );
+export async function deleteMeeting(meetingId: string, userId?: string): Promise<void> {
+  const params: unknown[] = [meetingId];
+  let sql = "DELETE FROM meetings WHERE id = $1";
+  if (userId) { params.push(userId); sql += " AND user_id = $2"; }
+  await query(sql, params);
 }
 
- 
-export async function getActionItems(
-  meetingId: string
-): Promise<ActionItem[]> {
+export async function getStats(userId: string) {
+  const result = await query<{
+    total: string;
+    completed: string;
+    total_duration_minutes: string;
+    actions_done: string;
+    actions_pending: string;
+  }>(
+    `SELECT
+       COUNT(DISTINCT m.id)::text AS total,
+       COUNT(DISTINCT CASE WHEN m.status = 'completed' THEN m.id END)::text AS completed,
+       COALESCE(SUM(
+         CASE
+           WHEN m.duration ~ '^[0-9]+$' THEN m.duration::int
+           ELSE 0
+         END
+       ), 0)::text AS total_duration_minutes,
+       COUNT(CASE WHEN ai.completed = TRUE THEN 1 END)::text AS actions_done,
+       COUNT(CASE WHEN ai.completed = FALSE THEN 1 END)::text AS actions_pending
+     FROM meetings m
+     LEFT JOIN action_items ai ON ai.meeting_id = m.id
+     WHERE m.user_id = $1`,
+    [userId]
+  );
+
+  const row = result.rows[0];
+  return {
+    totalMeetings: parseInt(row.total),
+    totalHours: Math.round(parseInt(row.total_duration_minutes) / 60 * 10) / 10,
+    actionItemsCompleted: parseInt(row.actions_done),
+    actionItemsPending: parseInt(row.actions_pending),
+  };
+}
+
+export async function getActionItems(meetingId: string): Promise<ActionItem[]> {
   const result = await query<ActionItem>(
     "SELECT * FROM action_items WHERE meeting_id = $1 ORDER BY created_at",
     [meetingId]
@@ -173,128 +190,68 @@ export async function createActionItem(
 ): Promise<ActionItem> {
   const result = await query<ActionItem>(
     `INSERT INTO action_items (meeting_id, text, assignee, due_date)
-     VALUES ($1, $2, $3, $4) RETURNING *`,
+     VALUES ($1, $2, $3, $4)
+     RETURNING *`,
     [meetingId, body.text, body.assignee, body.due_date ?? null]
   );
   return result.rows[0];
 }
 
-export async function toggleActionItem(
-  meetingId: string,
-  itemId: string
-): Promise<ActionItem> {
+export async function toggleActionItem(meetingId: string, itemId: string): Promise<ActionItem> {
   const result = await query<ActionItem>(
-    `UPDATE action_items
-     SET completed = NOT completed
+    `UPDATE action_items SET completed = NOT completed
      WHERE id = $1 AND meeting_id = $2
      RETURNING *`,
     [itemId, meetingId]
   );
-  if (result.rows.length === 0) {
-    throw new AppError(404, "Action item not found");
-  }
+  if (result.rows.length === 0) throw new Error("Action item not found");
   return result.rows[0];
 }
 
-export async function deleteActionItem(
-  meetingId: string,
-  itemId: string
-): Promise<void> {
-  const result = await query(
-    "DELETE FROM action_items WHERE id = $1 AND meeting_id = $2",
-    [itemId, meetingId]
-  );
-  if (result.rowCount === 0) {
-    throw new AppError(404, "Action item not found");
-  }
+export async function deleteActionItem(meetingId: string, itemId: string): Promise<void> {
+  await query("DELETE FROM action_items WHERE id = $1 AND meeting_id = $2", [itemId, meetingId]);
 }
 
- 
-export async function saveMeetingAnalysis(
-  meetingId: string,
-  analysis: {
-    summary: string;
-    action_items: Array<{ text: string; assignee: string; due_date?: string }>;
-    decisions: string[];
-  }
-): Promise<void> {
-  await transaction(async (client: PoolClient) => {
-    await client.query("UPDATE meetings SET summary = $1, status = 'completed' WHERE id = $2", [
-      analysis.summary,
-      meetingId,
-    ]);
-
-    for (const item of analysis.action_items) {
-      await client.query(
-        "INSERT INTO action_items (meeting_id, text, assignee, due_date) VALUES ($1, $2, $3, $4)",
-        [meetingId, item.text, item.assignee, item.due_date ?? null]
-      );
-    }
-
-    for (const decision of analysis.decisions) {
-      await client.query(
-        "INSERT INTO decisions (meeting_id, text) VALUES ($1, $2)",
-        [meetingId, decision]
-      );
-    }
-  });
-}
 
 export async function saveTranscript(
   meetingId: string,
-  entries: Array<{ speaker: string; text: string; timestamp: string }>
+  segments: Array<{ speaker: string; text: string; timestamp: string }>
 ): Promise<void> {
   await query("DELETE FROM transcript_entries WHERE meeting_id = $1", [meetingId]);
 
-  for (let i = 0; i < entries.length; i++) {
-    const e = entries[i];
+  for (let i = 0; i < segments.length; i++) {
+    const s = segments[i];
     await query(
-      "INSERT INTO transcript_entries (meeting_id, speaker, text, timestamp, sequence_order) VALUES ($1, $2, $3, $4, $5)",
-      [meetingId, e.speaker, e.text, e.timestamp, i + 1]
+      `INSERT INTO transcript_entries (meeting_id, speaker, text, timestamp, sequence_order)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [meetingId, s.speaker, s.text, s.timestamp, i + 1]
     );
   }
 }
 
-export async function getStats(): Promise<{
-  totalMeetings: number;
-  totalHours: number;
-  actionItemsCompleted: number;
-  actionItemsPending: number;
-}> {
-  const [meetingStats, actionStats] = await Promise.all([
-    query<{ total: string; hours: string }>(`
-      SELECT
-        COUNT(*) as total,
-        COALESCE(
-          SUM(
-            CASE
-              WHEN duration LIKE '%h%' THEN
-                CAST(SPLIT_PART(duration, 'h', 1) AS FLOAT) +
-                COALESCE(CAST(NULLIF(TRIM(SPLIT_PART(SPLIT_PART(duration, 'h', 2), 'min', 1)), '') AS FLOAT), 0) / 60
-              WHEN duration LIKE '%min%' THEN
-                CAST(SPLIT_PART(duration, ' ', 1) AS FLOAT) / 60
-              ELSE 0
-            END
-          ), 0
-        ) as hours
-      FROM meetings
-      WHERE created_at >= date_trunc('month', NOW())
-    `),
-    query<{ completed: string; pending: string }>(`
-      SELECT
-        COUNT(*) FILTER (WHERE completed = true) as completed,
-        COUNT(*) FILTER (WHERE completed = false) as pending
-      FROM action_items
-      WHERE created_at >= date_trunc('week', NOW())
-    `),
+export async function saveMeetingAnalysis(
+  meetingId: string,
+  analysis: {
+    summary: string;
+    decisions: string[];
+    action_items: Array<{ text: string; assignee: string; due_date?: string }>;
+  }
+): Promise<void> {
+  await query("UPDATE meetings SET summary = $1, status = 'completed' WHERE id = $2", [
+    analysis.summary, meetingId,
   ]);
 
-  return {
-    totalMeetings: parseInt(meetingStats.rows[0]?.total ?? "0"),
-    totalHours: parseFloat(
-      (meetingStats.rows[0]?.hours ?? "0").toString()
-    ),
-    actionItemsCompleted: parseInt(actionStats.rows[0]?.completed ?? "0"),
-    actionItemsPending: parseInt(actionStats.rows[0]?.pending ?? "0"),
-  };
+  await query("DELETE FROM decisions WHERE meeting_id = $1", [meetingId]);
+  for (const text of analysis.decisions) {
+    await query("INSERT INTO decisions (meeting_id, text) VALUES ($1, $2)", [meetingId, text]);
+  }
+
+  await query("DELETE FROM action_items WHERE meeting_id = $1", [meetingId]);
+  for (const item of analysis.action_items) {
+    await query(
+      `INSERT INTO action_items (meeting_id, text, assignee, due_date)
+       VALUES ($1, $2, $3, $4)`,
+      [meetingId, item.text, item.assignee, item.due_date ?? null]
+    );
+  }
 }
