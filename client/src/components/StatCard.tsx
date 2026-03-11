@@ -1,4 +1,3 @@
-// src/components/StatCard.tsx
 import { motion } from "framer-motion";
 import { LucideIcon } from "lucide-react";
 

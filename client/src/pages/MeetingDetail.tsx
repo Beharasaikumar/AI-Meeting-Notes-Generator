@@ -39,7 +39,6 @@ const MeetingDetail = () => {
 
   useEffect(() => { load(); }, [id]);
 
-  // Poll while processing
   useEffect(() => {
     if (meeting?.status !== "processing") return;
     const interval = setInterval(load, 5000);

@@ -5,11 +5,12 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Layout } from "@/components/Layout";
 import Index from "./pages/Index";
-import Meetings from "./pages/Meetings";
+// import Meetings from "./pages/Meetings";
 import MeetingDetail from "./pages/MeetingDetail";
 import Upload from "./pages/Upload";
 import SearchPage from "./pages/SearchPage";
 import NotFound from "./pages/NotFound";
+import Tasks from "./pages/Tasks";
 
 const queryClient = new QueryClient();
 
@@ -22,7 +23,7 @@ const App = () => (
         <Layout>
           <Routes>
             <Route path="/" element={<Index />} />
-            <Route path="/meetings" element={<Meetings />} />
+            <Route path="/tasks" element={<Tasks />} />
             <Route path="/meeting/:id" element={<MeetingDetail />} />
             <Route path="/upload" element={<Upload />} />
             <Route path="/search" element={<SearchPage />} />

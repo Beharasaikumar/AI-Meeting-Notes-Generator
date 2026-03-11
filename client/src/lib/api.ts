@@ -196,6 +196,7 @@ export type CreateMeetingBody = {
   participants: string[];
   tags?: string[];
   status?: MeetingStatus;
+  duration?: string;
 };
 
 export interface DashboardStats {

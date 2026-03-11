@@ -27,10 +27,8 @@ const Meetings = () => {
     }
   }, []);
 
-  // Initial load
   useEffect(() => { load(); }, [load]);
 
-  // Debounced search
   useEffect(() => {
     const t = setTimeout(() => load(search || undefined), 300);
     return () => clearTimeout(t);

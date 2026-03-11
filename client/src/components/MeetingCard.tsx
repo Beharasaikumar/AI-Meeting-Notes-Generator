@@ -1,15 +1,14 @@
-// src/components/MeetingCard.tsx
 import { motion } from "framer-motion";
 import { Clock, Users, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router-dom";
 import type { Meeting } from "@/lib/api";
 
-const statusColors: Record<string, string> = {
-  completed: "bg-green-500/15 text-green-600 border-green-500/20",
-  processing: "bg-yellow-500/15 text-yellow-600 border-yellow-500/20",
-  scheduled: "bg-blue-500/15 text-blue-600 border-blue-500/20",
-};
+// const statusColors: Record<string, string> = {
+//   completed: "bg-green-500/15 text-green-600 border-green-500/20",
+//   processing: "bg-yellow-500/15 text-yellow-600 border-yellow-500/20",
+//   scheduled: "bg-blue-500/15 text-blue-600 border-blue-500/20",
+// };
 
 interface MeetingCardProps {
   meeting: Meeting;
@@ -30,9 +29,9 @@ export function MeetingCard({ meeting, index = 0 }: MeetingCardProps) {
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 mb-2 flex-wrap">
-              <Badge variant="outline" className={statusColors[meeting.status]}>
+              {/* <Badge variant="outline" className={statusColors[meeting.status]}>
                 {meeting.status}
-              </Badge>
+              </Badge> */}
               {meeting.tags.slice(0, 2).map((tag) => (
                 <Badge key={tag} variant="secondary" className="text-xs">
                   {tag}

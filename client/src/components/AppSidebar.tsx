@@ -18,13 +18,13 @@ import { Button } from "@/components/ui/button";
 
 const mainItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
-  { title: "Meetings", url: "/meetings", icon: Mic },
+  { title: "Tasks", url: "/tasks", icon: Mic },
   { title: "Search", url: "/search", icon: Search },
 ];
 
-const secondaryItems = [
-  { title: "Settings", url: "/settings", icon: Settings },
-];
+// const secondaryItems = [
+//   { title: "Settings", url: "/settings", icon: Settings },
+// ];
 
 export function AppSidebar() {
   const { state } = useSidebar();
@@ -77,7 +77,7 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <SidebarGroup>
+        {/* <SidebarGroup>
           <SidebarGroupLabel>Settings</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -93,7 +93,7 @@ export function AppSidebar() {
               ))}
             </SidebarMenu>
           </SidebarGroupContent>
-        </SidebarGroup>
+        </SidebarGroup> */}
       </SidebarContent>
 
       <SidebarFooter className="p-3">
