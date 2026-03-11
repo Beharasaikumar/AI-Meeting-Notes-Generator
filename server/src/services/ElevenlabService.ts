@@ -108,6 +108,7 @@ export function normaliseTranscription(
   transcription: ElevenLabsTranscription,
   speakerNames?: Record<string, string>
 ): NormalisedSegment[] {
+
   const mapSpeaker = (id: string): string => {
     if (speakerNames?.[id]) return speakerNames[id];
     const match = id.match(/\d+$/);
@@ -124,18 +125,43 @@ export function normaliseTranscription(
     }));
   }
 
+  if (transcription.words && transcription.words.length > 0) {
+
+    const segments: NormalisedSegment[] = [];
+
+    const CHUNK_SIZE = 15;
+
+    for (let i = 0; i < transcription.words.length; i += CHUNK_SIZE) {
+
+      const chunk = transcription.words.slice(i, i + CHUNK_SIZE);
+
+      segments.push({
+        speaker: "Speaker",
+        text: chunk.map(w => w.text).join(" "),
+        timestamp: secondsToTimestamp(chunk[0].start),
+        start: chunk[0].start,
+        end: chunk[chunk.length - 1].end,
+      });
+
+    }
+
+    return segments;
+  }
+
+
   if (!transcription.text) {
-    logger.warn("[ElevenLabs] No text or utterances in response");
+    logger.warn("[ElevenLabs] No transcription content");
     return [];
   }
 
   const sentences = transcription.text.split(/(?<=[.!?])\s+/).filter(Boolean);
-  return sentences.map((sentence) => ({
+
+  return sentences.map((sentence, i) => ({
     speaker: "Speaker",
     text: sentence.trim(),
-    timestamp: "00:00:00",
-    start: 0,
-    end: 0,
+    timestamp: secondsToTimestamp(i * 5), // fake but progressive timestamp
+    start: i * 5,
+    end: (i + 1) * 5,
   }));
 }
 
