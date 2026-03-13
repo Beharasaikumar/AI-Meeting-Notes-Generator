@@ -474,3 +474,5 @@ For Gmail, use an **App Password** (not your regular password). Enable 2-Step Ve
 ---
 
 ## License
+
+MIT — see [LICENSE](./LICENSE) for details.
