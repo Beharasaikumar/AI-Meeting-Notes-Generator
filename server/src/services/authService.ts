@@ -188,15 +188,24 @@ async function sendResetEmail(
   name: string,
   token: string
 ): Promise<void> {
+
+  const port = parseInt(process.env.SMTP_PORT ?? "587");
+  const secure = port === 465;
+
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT ?? "587"),
-    secure: process.env.SMTP_SECURE === "true",
+    port,
+    secure,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
+    tls:{
+      rejectUnauthorized: process.env.SMTP_REJECT_UNAUTHORIZED !== "false",
+    },
   });
+
+  await transporter.verify();
 
   const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
 
@@ -208,12 +217,17 @@ async function sendResetEmail(
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;">
         <h2 style="margin:0 0 8px">Reset your password</h2>
         <p style="color:#666">Hi ${name},</p>
-        <p style="color:#666">Someone requested a password reset for your MeetingMind account. Click the button below to set a new password. This link expires in ${RESET_TTL_MINUTES} minutes.</p>
+        <p style="color:#666">Someone requested a password reset for your MeetingMind account.
+           Click the button below to set a new password.
+           This link expires in ${RESET_TTL_MINUTES} minutes.</p>
         <a href="${resetUrl}"
-           style="display:inline-block;margin:24px 0;padding:12px 28px;background:#6366f1;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;">
+           style="display:inline-block;margin:24px 0;padding:12px 28px;background:#6366f1;
+                  color:#fff;border-radius:8px;text-decoration:none;font-weight:600;">
           Reset Password
         </a>
-        <p style="color:#999;font-size:13px;">If you didn't request this, you can safely ignore this email.</p>
+        <p style="color:#999;font-size:13px;">
+          If you didn't request this, you can safely ignore this email.
+        </p>
         <p style="color:#bbb;font-size:12px;">Or copy this link: ${resetUrl}</p>
       </div>
     `,
